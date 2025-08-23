@@ -1,0 +1,7 @@
+streamlit
+google-generativeai
+Pillow
+pandas
+networkx
+matplotlib
+pyvis
