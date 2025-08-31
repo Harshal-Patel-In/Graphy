@@ -147,7 +147,7 @@ with st.expander("Export Graph"):
      st.download_button("📄 Download GraphML", data=graphml_buf.getvalue(),
                         file_name="graph.graphml", mime="application/graphml+xml")
 
-     # Adjacency List (✅ fixed)
+     # Adjacency List
      adj_list_text = "\n".join(nx.generate_adjlist(G))
      st.download_button(
          "📜 Download Adjacency List",
