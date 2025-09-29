@@ -61,6 +61,51 @@ for key in ["graph_data", "graph_image", "graph_csv", "graph_data_json", "graphy
 if st.session_state.get("graphy_isolated") is None:
     st.session_state["graphy_isolated"] = False
 
+SYSTEM_PROMPT = """You are Graphy, an expert data analyst, chart interpreter, and relational insights generator.
+
+Your goals:
+
+Carefully examine the user’s graph/image and any provided data.
+
+Provide clear, accurate observations with both numerical and contextual interpretation.
+
+Go beyond surface-level trends by also identifying:
+
+Relations and correlations (e.g., "X rises when Y falls").
+
+Possible causations (with uncertainty noted).
+
+Comparisons between categories, groups, or time periods.
+
+Anomalies, outliers, and turning points.
+
+Produce multiple distinct answer variants covering different perspectives, such as:
+
+Concise executive summary.
+
+Detailed numeric/technical analysis (cite exact rows, columns, or data points).
+
+Relational/causal interpretation (explain what variables seem linked and how strongly).
+
+Actionable recommendations (what to do with these insights).
+
+Storytelling/insightful narrative (explain the data as if presenting to a non-technical audience).
+
+When asked for machine-readable output (e.g., "as json", "as csv"), provide only the raw data in the requested format inside triple backticks with the correct language tag — no commentary.
+
+Always state assumptions, uncertainty, and confidence levels in your interpretations.
+
+When doing calculations, show short steps transparently.
+
+Output rules:
+
+Separate answer variants using the exact delimiter line:
+
+===VARIANT===
+
+
+Label each section as Variant 1, Variant 2, Variant 3, …"""
+
 # ---------------------------
 # Isolation toggle UI
 # ---------------------------
@@ -139,6 +184,9 @@ if st.session_state.get("graph_csv") is not None:
 
 st.divider()
 
+# Option to choose number of answer variants
+n_variants = st.sidebar.slider("Number of answer variants", min_value=1, max_value=5, value=3, help="How many distinct answer variants would you like the model to produce for each prompt?")
+
 # Chat history
 for msg in st.session_state.get("messages", []):
     avatar = "🧑" if msg["role"] == "user" else "🤖"
@@ -155,7 +203,14 @@ if prompt:
     with st.chat_message("user", avatar="🧑"):
         st.markdown(prompt)
 
-    inputs = [prompt]
+    variant_instruction = (
+        f"Please produce {n_variants} distinct answer variants separated by the exact delimiter line:\n\n===VARIANT===\n\n"
+        "Each variant should be labeled (Variant 1, Variant 2, ...). For each variant include:\n"
+        "- One-line concise summary\n- Detailed analysis (key numbers/trends, calculations if any)\n- One actionable recommendation\n\n"
+        "If the user explicitly asked for machine-readable output ('as json' or 'as csv'), put the raw JSON/CSV in its own variant and wrap it in triple backticks with the proper language tag (```json or ```csv). Otherwise include human-readable text only."
+    )
+
+    inputs = [SYSTEM_PROMPT, variant_instruction, prompt]
     lower = prompt.lower()
     if any(k in lower for k in ["as csv", "csv file", "generate csv", "return csv"]):
         inputs.append("IMPORTANT: Output only raw CSV (no explanations, no markdown).")
@@ -182,46 +237,61 @@ if prompt:
         inputs.append(gimg)
 
     try:
+        # We keep the same call shape as before but we've structured the inputs so the model receives the system prompt first.
         response = model.generate_content(inputs)
         reply = response.text if response and response.text else "⚠️ No response from model."
     except Exception as e:
         reply = f"⚠️ Model error: {e}"
 
+    # store the raw assistant reply into messages
     msgs = st.session_state.get("messages", [])
     msgs.append({"role": "assistant", "content": reply})
     st.session_state["messages"] = msgs
+
+    # Show the full assistant bubble
     with st.chat_message("assistant", avatar="🤖"):
         st.markdown(reply)
 
-    extracted, lang = extract_code_block(reply)
-    candidate = extracted if extracted else reply.strip()
+    # Try to split into variants using the exact delimiter
+    variants = [v.strip() for v in reply.split("===VARIANT===") if v.strip()]
 
-    if looks_like_json(candidate):
-        try:
-            parsed_json = json.loads(candidate)
-            st.download_button(
-                "⬇️ Download Generated JSON",
-                data=json.dumps(parsed_json, indent=2),
-                file_name="generated.json",
-                mime="application/json",
-            )
-            with st.expander("👀 Preview JSON"):
-                st.json(parsed_json)
-        except Exception:
-            pass
+    if not variants:
+        # fallback: show whole reply as single variant
+        variants = [reply.strip()]
 
-    elif looks_like_csv(candidate):
-        try:
-            df = pd.read_csv(io.StringIO(candidate))
-            st.download_button(
-                "⬇️ Download Generated CSV",
-                data=candidate,
-                file_name="generated.csv",
-                mime="text/csv",
-            )
-            with st.expander("👀 Preview CSV"):
-                st.dataframe(df)
-        except Exception:
-            pass
+    # Display each variant separately with detection for JSON/CSV code blocks
+    for i, var in enumerate(variants):
+        with st.expander(f"Variant {i+1}"):
+            st.markdown(var)
 
+            # attempt to extract a fenced code block (json/csv)
+            extracted, lang = extract_code_block(var)
+            candidate = extracted if extracted else var.strip()
 
+            if lang == "json" or looks_like_json(candidate):
+                try:
+                    parsed_json = json.loads(candidate)
+                    st.download_button(
+                        f"⬇️ Download Variant {i+1} JSON",
+                        data=json.dumps(parsed_json, indent=2),
+                        file_name=f"generated_variant_{i+1}.json",
+                        mime="application/json",
+                    )
+                    with st.expander(f"👀 Preview Variant {i+1} JSON"):
+                        st.json(parsed_json)
+                except Exception:
+                    pass
+
+            elif lang == "csv" or looks_like_csv(candidate):
+                try:
+                    df = pd.read_csv(io.StringIO(candidate))
+                    st.download_button(
+                        f"⬇️ Download Variant {i+1} CSV",
+                        data=candidate,
+                        file_name=f"generated_variant_{i+1}.csv",
+                        mime="text/csv",
+                    )
+                    with st.expander(f"👀 Preview Variant {i+1} CSV"):
+                        st.dataframe(df)
+                except Exception:
+                    pass
