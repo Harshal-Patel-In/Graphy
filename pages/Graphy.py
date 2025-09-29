@@ -19,7 +19,7 @@ st.markdown("""
 
 # 🔑 Configure Gemini
 genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-model = genai.GenerativeModel("gemini-pro-vision")
+model = genai.GenerativeModel("gemini-2.5-flash")
 
 # ---------------------------
 # Helpers
@@ -223,4 +223,5 @@ if prompt:
                 st.dataframe(df)
         except Exception:
             pass
+
 
